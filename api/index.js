@@ -1,10 +1,12 @@
 require('dotenv').config();
 
 const express = require('express');
+const cors = require('cors')
 const app = express();
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)
 
 app.use(express.static('public'));
+app.use(cors())
 
 app.get("/publishkey", function (req, res) {
     res.json({publishable_key: process.env.STRIPE_PUBLISHABLE_KEY})
