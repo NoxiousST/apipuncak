@@ -5,22 +5,18 @@ import cors from 'cors';
 import bodyParser from 'body-parser';
 import axios from 'axios';
 import parser, {HTMLElement} from "node-html-parser";
-
 import {createClient} from '@supabase/supabase-js'
+import Stripe from 'stripe';
 
+const app = express();
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
-
-const app = express();
-
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 app.use(express.static('public'));
-
 app.use(bodyParser.urlencoded({extended: false}))
 app.use(bodyParser.json())
-
 app.use(cors())
 
 app.use(function (req, res, next) {
@@ -33,13 +29,13 @@ app.use(function (req, res, next) {
     next();
 });
 
-app.get("/publishkey", function (req, res) {
+app.get("/publishkey", function (_, res) {
     res.json({publishable_key: process.env.STRIPE_PUBLISHABLE_KEY})
 })
 
 app.post("/create-payment-intent", async (req, res) => {
     let {name, email, amount, note} = req.body
-    let customer
+    let customer: Stripe.Customer
 
     const customers = await stripe.customers.search({
         query: `email: '${email}'`,
@@ -61,7 +57,7 @@ app.post("/create-payment-intent", async (req, res) => {
     return res.json({client_secret: paymentIntent.client_secret})
 })
 
-app.get("/informasi-letusan", async (req, res) => {
+app.get("/informasi-letusan", async (_, res) => {
     const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/informasi-letusan', {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => informasiLetusan(r))
@@ -69,7 +65,7 @@ app.get("/informasi-letusan", async (req, res) => {
     return res.json({data})
 })
 
-app.get("/laporan", async (req, res) => {
+app.get("/laporan", async (_, res) => {
     const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/laporan', {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => laporan(r))
@@ -77,7 +73,7 @@ app.get("/laporan", async (req, res) => {
     return res.json({data})
 })
 
-app.get("/laporan-harian", async (req, res) => {
+app.get("/laporan-harian", async (_, res) => {
     const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/laporan-harian', {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => laporanHarian(r))
@@ -85,7 +81,7 @@ app.get("/laporan-harian", async (req, res) => {
     return res.json({data})
 })
 
-app.get("/tingkat-aktivitas", async (req, res) => {
+app.get("/tingkat-aktivitas", async (_, res) => {
     const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas', {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => tingkatAktivitas(r))
@@ -94,36 +90,25 @@ app.get("/tingkat-aktivitas", async (req, res) => {
 })
 
 app.get("/data-laporan", async (req, res) => {
-    const link = req.query.url
-    const data = await axios.get(link, {responseType: 'document'})
+    const {url, point} = req.query
+    const data = await axios.get(url.toString(), {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => dataLaporan(r))
+
+    if (point) {
+        const database = await supabase.from("mountains").select("id, name, latitude, longitude").eq('name', data.name).single();
+        if (database.data) {
+            data.latitude = database.data.latitude;
+            data.longitude = database.data.longitude;
+        }
+
+    }
 
     return res.json({data})
 })
 
-type Mount = {
-    name: string;
-    location: string;
-    link: string;
-    status: string;
-    latitude: number;
-    longitude: number;
 
-    visual: string,
-    gempa: string,
-    rekomendasi: string
-
-};
-
-type TingkatAktivitas = {
-    status: string;
-    description: string;
-    count: number;
-    mounts: Mount[];
-};
-
-app.get("/mapbox", async (req, res) => {
+app.get("/mapbox", async (_, res) => {
     const response = await supabase.from("mountains").select("id, type, name, latitude, longitude, region");
     const respo = await axios.get('http://localhost:3000/tingkat-aktivitas', {responseType: 'json'});
     const aktivitas: TingkatAktivitas[] = respo.data.data;
@@ -133,14 +118,12 @@ app.get("/mapbox", async (req, res) => {
     aktivitas.forEach(act => {
         act.mounts.forEach(mount => {
             promises.push(
-                axios.get(`http://localhost:3000/data-laporan?url=${mount.link}`, {responseType: 'json'})
+                axios.get(`http://localhost:3000/data-laporan?url=${mount.link}&point=false`, {responseType: 'json'})
                     .then(resp => {
-                        const laporan = resp.data.data
+                        const dat = resp.data.data
                         const coord = response.data.find(c => c.name.toLowerCase().replace(/\s/g, '').trim() === mount.name.toLowerCase().replace(/\s/g, '').trim());
                         if (coord) {
-                            mount.visual = laporan.visual
-                            mount.gempa = laporan.gempa
-                            mount.rekomendasi = laporan.rekomendasi
+                            mount.laporan = dat.laporan
                             mount.status = act.status
                             mount.latitude = coord.latitude
                             mount.longitude = coord.longitude
@@ -154,15 +137,73 @@ app.get("/mapbox", async (req, res) => {
     return res.json({aktivitas});
 });
 
-function dataLaporan(root: HTMLElement) {
+
+interface Laporan {
+    level: string,
+    name: string,
+    date: string,
+    time: string,
+    author: string,
+    geo: string,
+    laporan: {
+        image: string,
+        visual: string,
+        klimatologi: string,
+        gempa: string[],
+        rekomendasi: string[]
+    }
+    latitude?: number,
+    longitude?: number
+}
+
+interface Mount {
+    name: string;
+    location: string;
+    link: string;
+    status: string;
+    latitude: number;
+    longitude: number;
+    laporan: {
+        image: string,
+        visual: string,
+        gempa: string[],
+        rekomendasi: string[]
+    }
+}
+
+interface TingkatAktivitas {
+    status: string;
+    description: string;
+    count: number;
+    mounts: Mount[];
+}
+
+function dataLaporan(root: HTMLElement): Laporan {
+    const main = root.querySelector(".card-blog")
+    const content = main.querySelector(".card-body")
+    const level = content.querySelector(".badge").text.trim()
+
+    const title = content.querySelector(".card-title").text.trim()
+    const regexTitle = /^(.+?),\s+(.+?),\s+(.+)$/;
+    const matchTitle = title.match(regexTitle);
+    const name = matchTitle[1];
+    const date = matchTitle[2];
+    const time = matchTitle[3];
+    const geo = main.querySelector(".card-body").querySelector(".col-lg-6.pd-0").text.trim()
+
+    let author = content.querySelector(".card-subtitle").text.trim()
+    author = author.replace(/^Dibuat oleh,\s+/, '').trim();
+
     const cardGroup = root.querySelector('.card-columns');
     const cards = cardGroup.querySelectorAll(".card");
 
     const visual = cards[0].querySelector(".media-body").querySelector("p").text.trim()
-    const gempa = cards[2].querySelector(".media-body").querySelectorAll("p").map(it => it.text.trim()).join("\n")
-    const rekomendasi = cards[3].querySelector(".media-body").querySelector("p").text.replace(/\d+\.\s/g, "").trim()
+    const image = cards[0].querySelector("img").getAttribute("src").trim()
+    const klimatologi = cards[1].querySelector(".media-body").querySelector("p").text.trim()
+    const gempa = cards[2].querySelector(".media-body").querySelectorAll("p").map(item => item.text.trim());
+    const rekomendasi = cards[3].querySelector(".media-body").querySelector("p").text.replace(/\d+\.\s/g, "").split('\n\n').map(item => item.trim());
 
-    return {visual, gempa, rekomendasi};
+    return {level, name, date, time, author, geo, laporan: {image, visual, klimatologi, gempa, rekomendasi}};
 }
 
 function informasiLetusan(root: HTMLElement) {
