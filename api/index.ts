@@ -44,12 +44,14 @@ app.post("/create-payment-intent", async (req, res) => {
     if (customers.data.length > 0) customer = customers.data.at(0)
     else customer = await stripe.customers.create({name, email})
 
+    if (!amount || !email) return res.json({client_secret: ""})
+
     const paymentIntent = await stripe.paymentIntents.create({
         customer: customer.id,
         receipt_email: email,
         amount,
         metadata: {
-            "Pesan/Catatan Donatur": note,
+            note,
         },
         currency: "idr",
     })
@@ -57,16 +59,62 @@ app.post("/create-payment-intent", async (req, res) => {
     return res.json({client_secret: paymentIntent.client_secret})
 })
 
-app.get("/informasi-letusan", async (_, res) => {
-    const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/informasi-letusan', {responseType: 'document'})
+interface PaymentIntent {
+    created: number;
+    amount: number
+    email: string;
+    name: string;
+    note: string;
+}
+
+interface Payment {
+    count: number;
+    total: number;
+    intents: PaymentIntent[];
+}
+
+app.get("/payments", async function (_, res) {
+    let paymentList: Payment = { count: 0, total: 0, intents: [] };
+
+    try {
+        const resp = await stripe.paymentIntents.list({ limit: 1000 });
+        const payments = resp.data.filter(intent => intent.status === 'succeeded');
+
+        for (const intent of payments) {
+            const customer = await stripe.customers.retrieve(intent.customer as string) as Stripe.Customer
+
+            paymentList.intents.push({
+                created: intent.created,
+                amount: intent.amount,
+                email: customer.email,
+                name: customer.name,
+                note: intent.metadata.note,
+            });
+        }
+
+        const totalAmount = payments.reduce((sum, intent) => sum + intent.amount, 0);
+        paymentList.count = payments.length;
+        paymentList.total = totalAmount;
+
+        res.json({ paymentList });
+    } catch (error) {
+        console.error('Error retrieving payments:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get("/informasi-letusan", async (req, res) => {
+    const {page} = req.query
+    const data = await axios.get(`https://magma.esdm.go.id/v1/gunung-api/informasi-letusan?page=${page}`, {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => informasiLetusan(r))
 
     return res.json({data})
 })
 
-app.get("/laporan", async (_, res) => {
-    const data = await axios.get('https://magma.esdm.go.id/v1/gunung-api/laporan', {responseType: 'document'})
+app.get("/laporan", async (req, res) => {
+    const {page} = req.query
+    const data = await axios.get(`https://magma.esdm.go.id/v1/gunung-api/laporan?page=${page}`, {responseType: 'document'})
         .then(r => parser.parse(r.data))
         .then(r => laporan(r))
 
@@ -89,11 +137,11 @@ app.get("/tingkat-aktivitas", async (_, res) => {
     return res.json({data})
 })
 
-app.get("/data-laporan", async (req, res) => {
+app.get("/data-laporan-aktivitas", async (req, res) => {
     const {url, point} = req.query
     const data = await axios.get(url.toString(), {responseType: 'document'})
         .then(r => parser.parse(r.data))
-        .then(r => dataLaporan(r))
+        .then(r => dataLaporanAktivitas(r))
 
     if (point) {
         const database = await supabase.from("mountains").select("id, name, latitude, longitude").eq('name', data.name).single();
@@ -101,12 +149,25 @@ app.get("/data-laporan", async (req, res) => {
             data.latitude = database.data.latitude;
             data.longitude = database.data.longitude;
         }
-
     }
 
     return res.json({data})
 })
 
+app.get("/data-laporan-letusan", async (req, res) => {
+    const {url} = req.query
+    const data = await axios.get(url.toString(), {responseType: 'document'})
+        .then(r => parser.parse(r.data))
+        .then(r => dataLaporanLetusan(r))
+
+        const database = await supabase.from("mountains").select("id, name, latitude, longitude").eq('name', data.title).single();
+        if (database.data) {
+            data.latitude = database.data.latitude;
+            data.longitude = database.data.longitude;
+        }
+
+    return res.json({data})
+})
 
 app.get("/mapbox", async (_, res) => {
     const response = await supabase.from("mountains").select("id, type, name, latitude, longitude, region");
@@ -138,7 +199,7 @@ app.get("/mapbox", async (_, res) => {
 });
 
 
-interface Laporan {
+interface LaporanAktivitas {
     level: string,
     name: string,
     date: string,
@@ -178,7 +239,7 @@ interface TingkatAktivitas {
     mounts: Mount[];
 }
 
-function dataLaporan(root: HTMLElement): Laporan {
+function dataLaporanAktivitas(root: HTMLElement): LaporanAktivitas {
     const main = root.querySelector(".card-blog")
     const content = main.querySelector(".card-body")
     const level = content.querySelector(".badge").text.trim()
@@ -204,6 +265,32 @@ function dataLaporan(root: HTMLElement): Laporan {
     const rekomendasi = cards[3].querySelector(".media-body").querySelector("p").text.replace(/\d+\.\s/g, "").split('\n\n').map(item => item.trim());
 
     return {level, name, date, time, author, geo, laporan: {image, visual, klimatologi, gempa, rekomendasi}};
+}
+
+interface LaporanLetusan {
+    image: string,
+    title: string,
+    date: string,
+    author: string,
+    description: string,
+    rekomendasi: string[],
+    latitude?: number,
+    longitude?: number
+}
+
+function dataLaporanLetusan(root: HTMLElement): LaporanLetusan {
+    const main = root.querySelector(".card-blog")
+    const content = main.querySelector(".card-body")
+    const second = main.querySelector(".col-md-7.col-lg-6.col-xl-7")
+
+    const image = content.querySelector(".img-fit-cover").getAttribute("src").trim()
+    const date = second.querySelector(".blog-category.tx-danger").text.trim()
+    const title = second.querySelector(".blog-title").text.split(' ').pop().trim()
+    const author = second.querySelector(".card-subtitle.tx-normal").text.split(', ')[1].trim()
+    const description = second.querySelectorAll("p").at(2).text.trim()
+    const rekomendasi = second.querySelector(".blog-text").childNodes.filter(it => it.text.trim() !== "").map(it => it.text.trim())
+
+    return {image, date, title, author, description, rekomendasi};
 }
 
 function informasiLetusan(root: HTMLElement) {
@@ -287,17 +374,16 @@ function laporanHarian(root: HTMLElement) {
         const rowData = {};
 
         cells.forEach((cell, index) => {
-            const cellContent = Array.from(cell.childNodes)
+            rowData[headers[index]] = Array.from(cell.childNodes)
                 .filter(child => child.text.trim() !== "")
                 .map(child => {
-                    if (child.parentNode.outerHTML.includes("ul") || child.parentNode.outerHTML.includes("ul"))
+                    if (child.parentNode.outerHTML.includes("ol") || child.parentNode.outerHTML.includes("ul"))
                         return Array.from(child.parentNode.querySelectorAll('li'))
                             .map(li => li.text.replace(/\d+\.\s/g, "").trim());
+
                     return child.text.trim();
                 })
                 .flat();
-
-            rowData[headers[index]] = Array.isArray(cellContent) && cellContent.length === 1 ? cellContent[0] : cellContent;
         });
 
         return rowData;
