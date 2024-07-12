@@ -178,7 +178,7 @@ app.get("/mapbox", async (_, res) => {
     aktivitas.forEach(act => {
         act.mounts.forEach(mount => {
             promises.push(
-                axios.get(`http://localhost:3000/data-laporan-aktivitas?url=${mount.link}&map=true`, {responseType: 'json'})
+                axios.get(`https://apipuncak.vercel.app/data-laporan-aktivitas?url=${mount.link}&map=true`, {responseType: 'json'})
                     .then(resp => {
                         const dat = resp.data.data
                         const coord = response.data.find(c => c.name.toLowerCase().replace(/\s/g, '').trim() === mount.name.toLowerCase().replace(/\s/g, '').trim());
