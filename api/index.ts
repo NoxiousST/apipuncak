@@ -10,6 +10,7 @@ import parser, {HTMLElement} from "node-html-parser";
 import {createClient} from '@supabase/supabase-js'
 import Stripe from 'stripe';
 
+
 const app = express();
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
@@ -135,10 +136,11 @@ app.get("/tingkat-aktivitas", async (_, res) => {
 })
 
 app.get("/data-laporan-aktivitas", async (req, res) => {
-    const {url} = req.query
+    const {url, map} = req.query
+
     const data = await axios.get(url.toString(), {responseType: 'document'})
         .then(r => parser.parse(r.data))
-        .then(r => dataLaporanAktivitas(r))
+        .then(r => dataLaporanAktivitas(r, map == "true"))
 
 
     const database = await supabase.from("mountains").select("id, name, latitude, longitude, code").eq('name', data.name).single();
@@ -176,7 +178,7 @@ app.get("/mapbox", async (_, res) => {
     aktivitas.forEach(act => {
         act.mounts.forEach(mount => {
             promises.push(
-                axios.get(`https://apipuncak.vercel.app/data-laporan-aktivitas?url=${mount.link}`, {responseType: 'json'})
+                axios.get(`http://localhost:3000/data-laporan-aktivitas?url=${mount.link}&map=true`, {responseType: 'json'})
                     .then(resp => {
                         const dat = resp.data.data
                         const coord = response.data.find(c => c.name.toLowerCase().replace(/\s/g, '').trim() === mount.name.toLowerCase().replace(/\s/g, '').trim());
@@ -268,7 +270,7 @@ function laporanAktivitas(root: HTMLElement) {
     return result;
 }
 
-function dataLaporanAktivitas(root: HTMLElement): LaporanAktivitas {
+function dataLaporanAktivitas(root: HTMLElement, map: boolean): LaporanAktivitas {
     const main = root.querySelector(".card-blog")
     const content = main.querySelector(".card-body")
     const level = content.querySelector(".badge").text.trim()
@@ -277,23 +279,29 @@ function dataLaporanAktivitas(root: HTMLElement): LaporanAktivitas {
     const regexTitle = /^(.+?),\s+(.+?),\s+(.+)$/;
     const matchTitle = title.match(regexTitle);
     const name = matchTitle[1];
-    const date = matchTitle[2];
-    const time = matchTitle[3];
-    const geo = main.querySelector(".card-body").querySelector(".col-lg-6.pd-0").text.trim()
-
-    let author = content.querySelector(".card-subtitle").text.trim()
-    author = author.replace(/^Dibuat oleh,\s+/, '').trim();
 
     const cardGroup = root.querySelector('.card-columns');
     const cards = cardGroup.querySelectorAll(".card");
 
     const visual = cards[0].querySelector(".media-body").querySelector("p").text.trim()
     const image = cards[0].querySelector("img").getAttribute("src").trim()
-    const klimatologi = cards[1].querySelector(".media-body").querySelector("p").text.trim()
-    const gempa = cards[2].querySelector(".media-body").querySelectorAll("p").map(item => item.text.trim());
-    const rekomendasi = cards[3].querySelector(".media-body").querySelector("p").text.replace(/\d+\.\s/g, "").split('\n\n').map(item => item.trim());
 
-    return {level, name, date, time, author, geo, laporan: {image, visual, klimatologi, gempa, rekomendasi}};
+    if (!map) {
+        const date = matchTitle[2];
+        const time = matchTitle[3];
+        const geo = main.querySelector(".card-body").querySelector(".col-lg-6.pd-0").text.trim()
+
+        let author = content.querySelector(".card-subtitle").text.trim()
+        author = author.replace(/^Dibuat oleh,\s+/, '').trim();
+
+        const klimatologi = cards[1].querySelector(".media-body").querySelector("p").text.trim()
+        const gempa = cards[2].querySelector(".media-body").querySelectorAll("p").map(item => item.text.trim());
+        const rekomendasi = cards[3].querySelector(".media-body").querySelector("p").text.replace(/\d+\.\s/g, "").split('\n\n').map(item => item.trim());
+
+        return {level, name, date, time, author, geo, laporan: {image, visual, klimatologi, gempa, rekomendasi}};
+    }
+
+    return {level, name, laporan: {image, visual}};
 }
 
 

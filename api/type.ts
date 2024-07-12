@@ -28,31 +28,28 @@ interface Mount {
     latitude: number;
     longitude: number;
     code: string;
-    laporan: {
-        image: string,
-        visual: string,
-        gempa: string[],
-        rekomendasi: string[]
-    }
+    laporan: Laporan
 }
 
 export interface LaporanAktivitas {
     level: string,
     name: string,
-    date: string,
-    time: string,
-    author: string,
-    geo: string,
+    date?: string,
+    time?: string,
+    author?: string,
+    geo?: string,
     code?: string,
-    laporan: {
-        image: string,
-        visual: string,
-        klimatologi: string,
-        gempa: string[],
-        rekomendasi: string[]
-    }
+    laporan: Laporan
     latitude?: number,
     longitude?: number
+}
+
+interface Laporan {
+    image: string,
+    visual: string,
+    klimatologi?: string,
+    gempa?: string[],
+    rekomendasi?: string[]
 }
 
 export interface LaporanLetusan {
