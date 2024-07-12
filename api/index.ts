@@ -168,7 +168,7 @@ app.get("/data-laporan-letusan", async (req, res) => {
 
 app.get("/mapbox", async (_, res) => {
     const response = await supabase.from("mountains").select("id, name, latitude, longitude");
-    const respo = await axios.get('http://localhost:3000/tingkat-aktivitas', {responseType: 'json'});
+    const respo = await axios.get('https://apipuncak.vercel.app/tingkat-aktivitas', {responseType: 'json'});
     const aktivitas: TingkatAktivitas[] = respo.data.data;
 
     const promises = [];
@@ -176,7 +176,7 @@ app.get("/mapbox", async (_, res) => {
     aktivitas.forEach(act => {
         act.mounts.forEach(mount => {
             promises.push(
-                axios.get(`http://localhost:3000/data-laporan-aktivitas?url=${mount.link}`, {responseType: 'json'})
+                axios.get(`https://apipuncak.vercel.app/data-laporan-aktivitas?url=${mount.link}`, {responseType: 'json'})
                     .then(resp => {
                         const dat = resp.data.data
                         const coord = response.data.find(c => c.name.toLowerCase().replace(/\s/g, '').trim() === mount.name.toLowerCase().replace(/\s/g, '').trim());
