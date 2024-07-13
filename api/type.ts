@@ -2,7 +2,6 @@ export interface PaymentIntent {
     created: number;
     amount: number
     email: string;
-    name: string;
     note: string;
     display: string
 }

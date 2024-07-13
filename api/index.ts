@@ -69,34 +69,26 @@ app.post("/create-payment-intent", async (req, res) => {
 app.get("/payments", async function (_, res) {
     let paymentList: Payments = {count: 0, total: 0, intents: []};
 
-    try {
-        const resp = await stripe.paymentIntents.list({limit: 1000});
-        const payments = resp.data.filter(intent => intent.status === 'succeeded');
+    const resp = await stripe.paymentIntents.list({limit: 500});
+    const payments = resp.data.filter(intent => intent.status === 'succeeded');
 
-        for (const intent of payments) {
-            const customer = await stripe.customers.retrieve(intent.customer as string) as Stripe.Customer
-
-            paymentList.intents.push({
-                created: intent.created,
-                amount: intent.amount,
-                email: customer.email,
-                name: customer.name,
-                note: intent.metadata.note,
-                display: intent.metadata.display
-            });
-        }
-
-        const totalAmount = payments.reduce((sum, intent) => sum + intent.amount, 0);
-        paymentList.count = payments.length;
-        paymentList.total = totalAmount;
-
-        res.json({paymentList});
-    } catch (error) {
-        console.error('Error retrieving payments:', error);
-        res.status(500).json({error: 'Internal Server Error'});
+    for (const intent of payments) {
+        paymentList.intents.push({
+            created: intent.created,
+            amount: intent.amount,
+            email: intent.receipt_email,
+            note: intent.metadata.note,
+            display: intent.metadata.display
+        });
     }
-});
 
+    const totalAmount = payments.reduce((sum, intent) => sum + intent.amount, 0);
+    paymentList.count = payments.length;
+    paymentList.total = totalAmount;
+
+    res.json({paymentList});
+
+});
 
 
 /*  <-- MAGMA Indonesia -->  */
